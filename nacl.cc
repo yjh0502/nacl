@@ -1,4 +1,5 @@
 #include <v8.h>
+#include <uv.h>
 #include <node.h>
 #include <node_buffer.h>
 #include <string.h>
@@ -30,22 +31,85 @@ static Buffer* str_to_buf (string s) {
     return res;
 }
 
+struct BoxRequest {
+    uv_work_t request;
+    Persistent<Function> callback;
+    
+    bool open, success;
+    string m, n, pk, sk;
 
-static Handle<Value> node_crypto_box (const Arguments& args) {
-    HandleScope scope;
-    string m = buf_to_str(args[0]->ToObject());
-    string n = buf_to_str(args[1]->ToObject());
-    string pk = buf_to_str(args[2]->ToObject());
-    string sk = buf_to_str(args[3]->ToObject());
+    string c, err;
+};
+
+static void BoxAsync(uv_work_t *req) {
+    BoxRequest *boxreq = static_cast<BoxRequest*>(req->data);
     try {
-        string c = crypto_box(m,n,pk,sk);
-        return scope.Close(str_to_buf(c)->handle_);
-    } catch(...) {
-        return scope.Close(Null());
+        if(!boxreq->open) {
+            boxreq->c = crypto_box(boxreq->m, boxreq->n, boxreq->pk, boxreq->sk);
+        } else {
+            boxreq->c = crypto_box_open(boxreq->m, boxreq->n, boxreq->pk, boxreq->sk);
+        }
+        boxreq->success = true;
+    } catch(const char *e) {
+        boxreq->err = string(e);
     }
 }
 
+static void BoxAsyncAfter(uv_work_t *req, int n) {
+    BoxRequest *boxreq = static_cast<BoxRequest*>(req->data);
+
+    Handle<Value> argv[2];
+    if(boxreq->success) {
+        argv[0] = Null();
+        argv[1] = str_to_buf(boxreq->c)->handle_;
+    } else {
+        argv[0] = String::New(boxreq->err.c_str());
+        argv[1] = Null();
+    }
+
+    boxreq->callback->Call(Context::GetCurrent()->Global(),
+        2, argv);
+    boxreq->callback.Dispose();
+    delete boxreq;
+}
+
+static Handle<Value> node_crypto_box (const Arguments& args) {
+    Handle<Function> cb = Handle<Function>::Cast(args[4]);
+
+    BoxRequest *boxreq = new BoxRequest();
+    boxreq->request.data = boxreq;
+    boxreq->callback = Persistent<Function>::New(cb);
+
+    boxreq->open = false;
+    boxreq->m = buf_to_str(args[0]->ToObject());
+    boxreq->n = buf_to_str(args[1]->ToObject());
+    boxreq->pk = buf_to_str(args[2]->ToObject());
+    boxreq->sk = buf_to_str(args[3]->ToObject());
+
+    uv_queue_work(uv_default_loop(), &boxreq->request,
+        BoxAsync, BoxAsyncAfter);
+
+    return Undefined();
+}
+
 static Handle<Value> node_crypto_box_open (const Arguments& args) {
+    Handle<Function> cb = Handle<Function>::Cast(args[4]);
+
+    BoxRequest *boxreq = new BoxRequest();
+    boxreq->request.data = boxreq;
+    boxreq->callback = Persistent<Function>::New(cb);
+
+    boxreq->open = true;
+    boxreq->m = buf_to_str(args[0]->ToObject());
+    boxreq->n = buf_to_str(args[1]->ToObject());
+    boxreq->pk = buf_to_str(args[2]->ToObject());
+    boxreq->sk = buf_to_str(args[3]->ToObject());
+
+    uv_queue_work(uv_default_loop(), &boxreq->request,
+        BoxAsync, BoxAsyncAfter);
+
+/*
+    return Undefined();
     HandleScope scope;
     string c = buf_to_str(args[0]->ToObject());
     string n = buf_to_str(args[1]->ToObject());
@@ -57,6 +121,7 @@ static Handle<Value> node_crypto_box_open (const Arguments& args) {
     } catch(...) {
         return scope.Close(Null());
     }
+    */
 }
 
 static Handle<Value> node_crypto_box_keypair (const Arguments& args) {

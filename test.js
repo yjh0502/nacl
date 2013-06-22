@@ -6,7 +6,9 @@ var kp_recv = nacl.box_keypair();
 
 var m = new Buffer("Hello, world!");
 
-var c = nacl.box(m, n, kp_recv[0], kp_send[1]);
-var m2 = nacl.box_open(c, n, kp_send[0], kp_recv[1]);
+nacl.box(m, n, kp_recv[0], kp_send[1], function(err, c) {
+    nacl.box_open(c, n, kp_send[0], kp_recv[1], function(err, m2) {
+        console.log(m2.toString());
+    });
+});
 
-console.log(m2.toString());
