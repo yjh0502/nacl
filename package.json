@@ -1,0 +1,13 @@
+{
+  "author": "Jihyun Yu <yjh0502@gmail.com>",
+  "name": "nacl",
+  "description": "Networking and Cryptography library bindings - high-speed, high-security, easy-to-use crypto library",
+  "version": "0.0.1",
+  "homepage": "https://github.com/yjh0502/nacl",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/yjh0502/nacl.git"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
