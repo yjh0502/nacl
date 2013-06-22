@@ -7,8 +7,6 @@
 #include <crypto_box.h>
 #include <crypto_sign.h>
 
-#include <stdio.h>
-
 using namespace std;
 using namespace node;
 using namespace v8;
@@ -56,8 +54,7 @@ static Handle<Value> node_crypto_box_open (const Arguments& args) {
     try {
         string m = crypto_box_open(c,n,pk,sk);
         return scope.Close(str_to_buf(m)->handle_);
-    } catch(const char * s) {
-        printf("%s\n", s);
+    } catch(...) {
         return scope.Close(Null());
     }
 }
