@@ -10,5 +10,7 @@
     },
     "main": "./build/Release/nacl",
     "dependencies": {},
-    "devDependencies": {}
+    "devDependencies": {
+        "async": "0.2.9"
+    }
 }
