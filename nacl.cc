@@ -14,13 +14,16 @@ using namespace std;
 using namespace node;
 using namespace v8;
 
-static Handle<Value> node_crypto_box (const Arguments&);
-static Handle<Value> node_crypto_box_open (const Arguments&);
-static Handle<Value> node_crypto_box_keypair (const Arguments&);
+static Handle<Value> nacl_box (const Arguments&);
+static Handle<Value> nacl_box_open (const Arguments&);
+static Handle<Value> nacl_box_keypair (const Arguments&);
 
-static Handle<Value> node_crypto_sign (const Arguments&);
-static Handle<Value> node_crypto_sign_open (const Arguments&);
-static Handle<Value> node_crypto_sign_keypair (const Arguments&);
+static Handle<Value> nacl_secretbox (const Arguments&);
+static Handle<Value> nacl_secretbox_open (const Arguments&);
+
+static Handle<Value> nacl_sign (const Arguments&);
+static Handle<Value> nacl_sign_open (const Arguments&);
+static Handle<Value> nacl_sign_keypair (const Arguments&);
 
 
 static string buf_to_str (Handle<Object> b) {
@@ -51,8 +54,7 @@ struct BoxRequest {
     string c, err;
 };
 
-static void BoxAsync(uv_work_t *req) {
-    BoxRequest *boxreq = static_cast<BoxRequest*>(req->data);
+static void calc(BoxRequest *boxreq) {
     try {
         switch(boxreq->type) {
         case Box:
@@ -73,6 +75,19 @@ static void BoxAsync(uv_work_t *req) {
     } catch(const char *e) {
         boxreq->err = string(e);
     }
+}
+
+static Handle<Value> returnval(BoxRequest *boxreq) {
+    if(boxreq->success) {
+        return str_to_buf(boxreq->c)->handle_;
+    } else {
+        return String::New(boxreq->err.c_str());
+    }
+}
+
+static void BoxAsync(uv_work_t *req) {
+    BoxRequest *boxreq = static_cast<BoxRequest*>(req->data);
+    calc(boxreq);
 }
 
 static void BoxAsyncAfter(uv_work_t *req, int n) {
@@ -116,7 +131,7 @@ static void fillReqSecret(const Arguments& args, BoxRequest *boxreq, BoxType typ
     boxreq->callback = Persistent<Function>::New(cb);
 }
 
-static Handle<Value> node_crypto_box (const Arguments& args) {
+static Handle<Value> nacl_box (const Arguments& args) {
     BoxRequest *boxreq = new BoxRequest();
     fillReqPublic(args, boxreq, Box);
 
@@ -126,7 +141,7 @@ static Handle<Value> node_crypto_box (const Arguments& args) {
     return Undefined();
 }
 
-static Handle<Value> node_crypto_box_open (const Arguments& args) {
+static Handle<Value> nacl_box_open (const Arguments& args) {
     BoxRequest *boxreq = new BoxRequest();
     fillReqPublic(args, boxreq, BoxOpen);
 
@@ -136,7 +151,22 @@ static Handle<Value> node_crypto_box_open (const Arguments& args) {
     return Undefined();
 }
 
-static Handle<Value> node_crypto_box_keypair (const Arguments& args) {
+static Handle<Value> nacl_box_sync (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqPublic(args, boxreq, Box);
+    calc(boxreq);
+    return returnval(boxreq);
+}
+
+static Handle<Value> nacl_box_open_sync (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqPublic(args, boxreq, BoxOpen);
+    calc(boxreq);
+    return returnval(boxreq);
+}
+
+
+static Handle<Value> nacl_box_keypair (const Arguments& args) {
     HandleScope scope;
     string sk;
     Buffer* pk_buf = str_to_buf(crypto_box_keypair(&sk));
@@ -147,7 +177,7 @@ static Handle<Value> node_crypto_box_keypair (const Arguments& args) {
     return scope.Close(res);
 }
 
-static Handle<Value> node_crypto_secretbox (const Arguments& args) {
+static Handle<Value> nacl_secretbox (const Arguments& args) {
     BoxRequest *boxreq = new BoxRequest();
     fillReqSecret(args, boxreq, SecretBox);
 
@@ -157,7 +187,7 @@ static Handle<Value> node_crypto_secretbox (const Arguments& args) {
     return Undefined();
 }
 
-static Handle<Value> node_crypto_secretbox_open (const Arguments& args) {
+static Handle<Value> nacl_secretbox_open (const Arguments& args) {
     BoxRequest *boxreq = new BoxRequest();
     fillReqSecret(args, boxreq, SecretBoxOpen);
 
@@ -167,7 +197,24 @@ static Handle<Value> node_crypto_secretbox_open (const Arguments& args) {
     return Undefined();
 }
 
-static Handle<Value> node_crypto_sign (const Arguments& args) {
+static Handle<Value> nacl_secretbox_sync (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqSecret(args, boxreq, SecretBox);
+
+    calc(boxreq);
+    return returnval(boxreq);
+}
+
+static Handle<Value> nacl_secretbox_open_sync (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqSecret(args, boxreq, SecretBoxOpen);
+
+    calc(boxreq);
+    return returnval(boxreq);
+}
+
+
+static Handle<Value> nacl_sign (const Arguments& args) {
     HandleScope scope;
     string m = buf_to_str(args[0]->ToObject());
     string sk = buf_to_str(args[1]->ToObject());
@@ -179,7 +226,7 @@ static Handle<Value> node_crypto_sign (const Arguments& args) {
     }
 }
 
-static Handle<Value> node_crypto_sign_open (const Arguments& args) {
+static Handle<Value> nacl_sign_open (const Arguments& args) {
     HandleScope scope;
     string sm = buf_to_str(args[0]->ToObject());
     string pk = buf_to_str(args[1]->ToObject());
@@ -191,7 +238,7 @@ static Handle<Value> node_crypto_sign_open (const Arguments& args) {
     }
 }
 
-static Handle<Value> node_crypto_sign_keypair (const Arguments& args) {
+static Handle<Value> nacl_sign_keypair (const Arguments& args) {
     HandleScope scope;
     string sk;
     Buffer* pk_buf = str_to_buf(crypto_sign_keypair(&sk));
@@ -206,16 +253,23 @@ static Handle<Value> node_crypto_sign_keypair (const Arguments& args) {
 void init (Handle<Object> target) {
     HandleScope scope;
 
-    NODE_SET_METHOD(target, "box", node_crypto_box);
-    NODE_SET_METHOD(target, "box_open", node_crypto_box_open);
-    NODE_SET_METHOD(target, "box_keypair", node_crypto_box_keypair);
+    NODE_SET_METHOD(target, "box", nacl_box);
+    NODE_SET_METHOD(target, "box_open", nacl_box_open);
 
-    NODE_SET_METHOD(target, "secretbox", node_crypto_secretbox);
-    NODE_SET_METHOD(target, "secretbox_open", node_crypto_secretbox_open);
+    NODE_SET_METHOD(target, "box_sync", nacl_box_sync);
+    NODE_SET_METHOD(target, "box_open_sync", nacl_box_open_sync);
 
-    NODE_SET_METHOD(target, "sign", node_crypto_sign);
-    NODE_SET_METHOD(target, "sign_open", node_crypto_sign_open);
-    NODE_SET_METHOD(target, "sign_keypair", node_crypto_sign_keypair);
+    NODE_SET_METHOD(target, "box_keypair", nacl_box_keypair);
+
+    NODE_SET_METHOD(target, "secretbox", nacl_secretbox);
+    NODE_SET_METHOD(target, "secretbox_open", nacl_secretbox_open);
+
+    NODE_SET_METHOD(target, "secretbox_sync", nacl_secretbox_sync);
+    NODE_SET_METHOD(target, "secretbox_open_sync", nacl_secretbox_open_sync);
+
+    NODE_SET_METHOD(target, "sign", nacl_sign);
+    NODE_SET_METHOD(target, "sign_open", nacl_sign_open);
+    NODE_SET_METHOD(target, "sign_keypair", nacl_sign_keypair);
 
     target->Set(String::NewSymbol("box_NONCEBYTES"),
         Integer::New(crypto_box_NONCEBYTES));

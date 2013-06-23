@@ -1,7 +1,7 @@
 var nacl = require('./build/Release/nacl'),
     async = require('async');
 
-
+console.log(nacl);
 
 var buffer_equal = function(b1, b2) {
     if(b1 == null || b2 == null) {
@@ -29,6 +29,14 @@ var test_public_box = function(cb) {
 
     nacl.box(m, n, kp_recv[0], kp_send[1], function(err, c) {
         if(err) { cb(err); return; }
+
+        var c_sync = nacl.box_sync(m, n, kp_recv[0], kp_send[1]);
+        if(!buffer_equal(c, c_sync)) {
+            cb(new Error("Output differs between sync & async: " +
+                c + ", " + c_sync));
+            return;
+        }
+
         nacl.box_open(c, n, kp_send[0], kp_recv[1], function(err, m2) {
             if(err) { cb(err); return; }
 
@@ -36,6 +44,14 @@ var test_public_box = function(cb) {
                 cb(new Error("Values not equal: " + m + ", " + m2));
                 return;
             }
+
+            var m2_sync = nacl.box_open_sync(c, n, kp_send[0], kp_recv[1]);
+            if(!buffer_equal(m2, m2_sync)) {
+                cb(new Error("Output differs between sync & async: " +
+                    m2 + ", " + m2_sync));
+                return;
+            }
+
             cb(null);
         });
     });
