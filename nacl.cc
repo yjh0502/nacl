@@ -5,8 +5,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+
 #include <crypto_box.h>
 #include <crypto_sign.h>
+#include <crypto_secretbox.h>
 
 using namespace std;
 using namespace node;
@@ -31,24 +33,42 @@ static Buffer* str_to_buf (string s) {
     return res;
 }
 
+enum BoxType {
+    Box,
+    BoxOpen,
+    SecretBox,
+    SecretBoxOpen,
+};
+
 struct BoxRequest {
     uv_work_t request;
     Persistent<Function> callback;
     
-    bool open, success;
+    BoxType type;
     string m, n, pk, sk;
 
+    bool success;
     string c, err;
 };
 
 static void BoxAsync(uv_work_t *req) {
     BoxRequest *boxreq = static_cast<BoxRequest*>(req->data);
     try {
-        if(!boxreq->open) {
+        switch(boxreq->type) {
+        case Box:
             boxreq->c = crypto_box(boxreq->m, boxreq->n, boxreq->pk, boxreq->sk);
-        } else {
+            break;
+        case BoxOpen:
             boxreq->c = crypto_box_open(boxreq->m, boxreq->n, boxreq->pk, boxreq->sk);
+            break;
+        case SecretBox:
+            boxreq->c = crypto_secretbox(boxreq->m, boxreq->n, boxreq->sk);
+            break;
+        case SecretBoxOpen:
+            boxreq->c = crypto_secretbox_open(boxreq->m, boxreq->n, boxreq->sk);
+            break;
         }
+
         boxreq->success = true;
     } catch(const char *e) {
         boxreq->err = string(e);
@@ -73,18 +93,32 @@ static void BoxAsyncAfter(uv_work_t *req, int n) {
     delete boxreq;
 }
 
-static Handle<Value> node_crypto_box (const Arguments& args) {
-    Handle<Function> cb = Handle<Function>::Cast(args[4]);
-
-    BoxRequest *boxreq = new BoxRequest();
-    boxreq->request.data = boxreq;
-    boxreq->callback = Persistent<Function>::New(cb);
-
-    boxreq->open = false;
+static void fillReqPublic(const Arguments& args, BoxRequest *boxreq, BoxType type) {
+    boxreq->type = type;
     boxreq->m = buf_to_str(args[0]->ToObject());
     boxreq->n = buf_to_str(args[1]->ToObject());
     boxreq->pk = buf_to_str(args[2]->ToObject());
     boxreq->sk = buf_to_str(args[3]->ToObject());
+
+    Handle<Function> cb = Handle<Function>::Cast(args[4]);
+    boxreq->request.data = boxreq;
+    boxreq->callback = Persistent<Function>::New(cb);
+}
+
+static void fillReqSecret(const Arguments& args, BoxRequest *boxreq, BoxType type) {
+    boxreq->type = type;
+    boxreq->m = buf_to_str(args[0]->ToObject());
+    boxreq->n = buf_to_str(args[1]->ToObject());
+    boxreq->sk = buf_to_str(args[2]->ToObject());
+
+    Handle<Function> cb = Handle<Function>::Cast(args[3]);
+    boxreq->request.data = boxreq;
+    boxreq->callback = Persistent<Function>::New(cb);
+}
+
+static Handle<Value> node_crypto_box (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqPublic(args, boxreq, Box);
 
     uv_queue_work(uv_default_loop(), &boxreq->request,
         BoxAsync, BoxAsyncAfter);
@@ -93,35 +127,13 @@ static Handle<Value> node_crypto_box (const Arguments& args) {
 }
 
 static Handle<Value> node_crypto_box_open (const Arguments& args) {
-    Handle<Function> cb = Handle<Function>::Cast(args[4]);
-
     BoxRequest *boxreq = new BoxRequest();
-    boxreq->request.data = boxreq;
-    boxreq->callback = Persistent<Function>::New(cb);
-
-    boxreq->open = true;
-    boxreq->m = buf_to_str(args[0]->ToObject());
-    boxreq->n = buf_to_str(args[1]->ToObject());
-    boxreq->pk = buf_to_str(args[2]->ToObject());
-    boxreq->sk = buf_to_str(args[3]->ToObject());
+    fillReqPublic(args, boxreq, BoxOpen);
 
     uv_queue_work(uv_default_loop(), &boxreq->request,
         BoxAsync, BoxAsyncAfter);
 
-/*
     return Undefined();
-    HandleScope scope;
-    string c = buf_to_str(args[0]->ToObject());
-    string n = buf_to_str(args[1]->ToObject());
-    string pk = buf_to_str(args[2]->ToObject());
-    string sk = buf_to_str(args[3]->ToObject());
-    try {
-        string m = crypto_box_open(c,n,pk,sk);
-        return scope.Close(str_to_buf(m)->handle_);
-    } catch(...) {
-        return scope.Close(Null());
-    }
-    */
 }
 
 static Handle<Value> node_crypto_box_keypair (const Arguments& args) {
@@ -133,6 +145,26 @@ static Handle<Value> node_crypto_box_keypair (const Arguments& args) {
     res->Set(0, pk_buf->handle_);
     res->Set(1, sk_buf->handle_);
     return scope.Close(res);
+}
+
+static Handle<Value> node_crypto_secretbox (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqSecret(args, boxreq, SecretBox);
+
+    uv_queue_work(uv_default_loop(), &boxreq->request,
+        BoxAsync, BoxAsyncAfter);
+
+    return Undefined();
+}
+
+static Handle<Value> node_crypto_secretbox_open (const Arguments& args) {
+    BoxRequest *boxreq = new BoxRequest();
+    fillReqSecret(args, boxreq, SecretBoxOpen);
+
+    uv_queue_work(uv_default_loop(), &boxreq->request,
+        BoxAsync, BoxAsyncAfter);
+
+    return Undefined();
 }
 
 static Handle<Value> node_crypto_sign (const Arguments& args) {
@@ -178,15 +210,28 @@ void init (Handle<Object> target) {
     NODE_SET_METHOD(target, "box_open", node_crypto_box_open);
     NODE_SET_METHOD(target, "box_keypair", node_crypto_box_keypair);
 
+    NODE_SET_METHOD(target, "secretbox", node_crypto_secretbox);
+    NODE_SET_METHOD(target, "secretbox_open", node_crypto_secretbox_open);
+
     NODE_SET_METHOD(target, "sign", node_crypto_sign);
     NODE_SET_METHOD(target, "sign_open", node_crypto_sign_open);
     NODE_SET_METHOD(target, "sign_keypair", node_crypto_sign_keypair);
 
-    target->Set(String::NewSymbol("box_NONCEBYTES"), Integer::New(crypto_box_NONCEBYTES));
-    target->Set(String::NewSymbol("box_PUBLICKEYBYTES"), Integer::New(crypto_box_PUBLICKEYBYTES));
-    target->Set(String::NewSymbol("box_SECRETKEYBYTES"), Integer::New(crypto_box_SECRETKEYBYTES));
+    target->Set(String::NewSymbol("box_NONCEBYTES"),
+        Integer::New(crypto_box_NONCEBYTES));
+    target->Set(String::NewSymbol("box_PUBLICKEYBYTES"),
+        Integer::New(crypto_box_PUBLICKEYBYTES));
+    target->Set(String::NewSymbol("box_SECRETKEYBYTES"),
+        Integer::New(crypto_box_SECRETKEYBYTES));
 
-    target->Set(String::NewSymbol("sign_PUBLICKEYBYTES"), Integer::New(crypto_sign_PUBLICKEYBYTES));
-    target->Set(String::NewSymbol("sign_SECRETKEYBYTES"), Integer::New(crypto_sign_SECRETKEYBYTES));
+    target->Set(String::NewSymbol("secretbox_NONCEBYTES"),
+        Integer::New(crypto_secretbox_NONCEBYTES));
+    target->Set(String::NewSymbol("secretbox_KEYBYTES"),
+        Integer::New(crypto_secretbox_KEYBYTES));
+
+    target->Set(String::NewSymbol("sign_PUBLICKEYBYTES"),
+        Integer::New(crypto_sign_PUBLICKEYBYTES));
+    target->Set(String::NewSymbol("sign_SECRETKEYBYTES"),
+        Integer::New(crypto_sign_SECRETKEYBYTES));
 }
 NODE_MODULE(nacl, init)
