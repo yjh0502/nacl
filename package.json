@@ -11,6 +11,7 @@
     "main": "./build/Release/nacl",
     "dependencies": {},
     "devDependencies": {
-        "async": "0.2.9"
+        "async": "0.2.9",
+        "mocha": "1.7.4"
     }
 }
