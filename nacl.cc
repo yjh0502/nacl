@@ -40,7 +40,7 @@ static Buffer* str_to_buf (string s) {
     return res;
 }
 
-enum BoxType {
+enum NaclReqType {
     Box,
     BoxOpen,
     Sign,
@@ -50,19 +50,24 @@ enum BoxType {
     SecretBoxOpen,
 };
 
+enum CallType {
+    Sync,
+    Async,
+};
+
 struct NaclReq {
     uv_work_t request;
     Persistent<Function> callback;
     
-    BoxType type;
+    NaclReqType type;
     string m, n, pk, sk;
 
     bool success;
     string c, err;
 
+    void init(const Arguments&, NaclReqType, CallType);
     void process();
     Handle<Value> returnVal();
-    static NaclReq* New(const Arguments& args, BoxType type);
 };
 
 void NaclReq::process() {
@@ -102,45 +107,6 @@ Handle<Value> NaclReq::returnVal() {
     }
 }
 
-NaclReq *NaclReq::New(const Arguments &args, BoxType type) {
-    HandleScope scope;
-    NaclReq *req = new NaclReq();
-    req->type = type;
-
-    int callbackIndex = 0;
-    switch(type) {
-    case Box:
-    case BoxOpen:
-        req->m = buf_to_str(args[0]->ToObject());
-        req->n = buf_to_str(args[1]->ToObject());
-        req->pk = buf_to_str(args[2]->ToObject());
-        req->sk = buf_to_str(args[3]->ToObject());
-        callbackIndex = 4;
-        break;
-
-    case Sign:
-    case SignOpen:
-        req->m = buf_to_str(args[0]->ToObject());
-        req->sk = buf_to_str(args[1]->ToObject());
-        callbackIndex = 2;
-        break;
-
-    case SecretBox:
-    case SecretBoxOpen:
-        req->m = buf_to_str(args[0]->ToObject());
-        req->n = buf_to_str(args[1]->ToObject());
-        req->sk = buf_to_str(args[2]->ToObject());
-        callbackIndex = 3;
-        break;
-    }
-
-    Handle<Function> cb = Handle<Function>::Cast(args[callbackIndex]);
-    req->request.data = req;
-    req->callback = Persistent<Function>::New(cb);
-
-    return req;
-}
-
 static void HandleReqAsync(uv_work_t *req) {
     NaclReq *naclreq = static_cast<NaclReq*>(req->data);
     naclreq->process();
@@ -164,31 +130,68 @@ static void HandleReqAsyncAfter(uv_work_t *req, int n) {
     delete naclreq;
 }
 
+void NaclReq::init(const Arguments &args, NaclReqType type, CallType callType) {
+    this->type = type;
+
+    int callbackIndex = 0;
+    switch(type) {
+    case Box:
+    case BoxOpen:
+        this->m = buf_to_str(args[0]->ToObject());
+        this->n = buf_to_str(args[1]->ToObject());
+        this->pk = buf_to_str(args[2]->ToObject());
+        this->sk = buf_to_str(args[3]->ToObject());
+        callbackIndex = 4;
+        break;
+
+    case Sign:
+    case SignOpen:
+        this->m = buf_to_str(args[0]->ToObject());
+        this->sk = buf_to_str(args[1]->ToObject());
+        callbackIndex = 2;
+        break;
+
+    case SecretBox:
+    case SecretBoxOpen:
+        this->m = buf_to_str(args[0]->ToObject());
+        this->n = buf_to_str(args[1]->ToObject());
+        this->sk = buf_to_str(args[2]->ToObject());
+        callbackIndex = 3;
+        break;
+    }
+
+    if(callType == Async) {
+        Handle<Function> cb = Handle<Function>::Cast(args[callbackIndex]);
+        this->request.data = this;
+        this->callback = Persistent<Function>::New(cb);
+        uv_queue_work(uv_default_loop(), &this->request, HandleReqAsync, HandleReqAsyncAfter);
+    }
+}
+
 static Handle<Value> nacl_box (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, Box);
-    uv_queue_work(uv_default_loop(), &req->request, HandleReqAsync, HandleReqAsyncAfter);
+    NaclReq *req = new NaclReq();
+    req->init(args, Box, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_box_sync (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, Box);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, Box, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 static Handle<Value> nacl_box_open (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, BoxOpen);
-    uv_queue_work(uv_default_loop(), &req->request, HandleReqAsync, HandleReqAsyncAfter);
+    NaclReq *req = new NaclReq();
+    req->init(args, BoxOpen, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_box_open_sync (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, BoxOpen);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, BoxOpen, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 static Handle<Value> nacl_box_keypair (const Arguments& args) {
@@ -203,30 +206,29 @@ static Handle<Value> nacl_box_keypair (const Arguments& args) {
 }
 
 static Handle<Value> nacl_sign (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, Sign);
-    uv_queue_work(uv_default_loop(), &req->request, HandleReqAsync, HandleReqAsyncAfter);
+    NaclReq *req = new NaclReq();
+    req->init(args, Sign, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_sign_sync (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, Sign);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, Sign, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 static Handle<Value> nacl_sign_open (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, SignOpen);
-    uv_queue_work(uv_default_loop(), &req->request, HandleReqAsync, HandleReqAsyncAfter);
+    NaclReq *req = new NaclReq();
+    req->init(args, SignOpen, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_sign_open_sync (const Arguments& args) {
-    HandleScope scope;
-    NaclReq *req = NaclReq::New(args, SignOpen);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, SignOpen, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 static Handle<Value> nacl_sign_keypair (const Arguments& args) {
@@ -241,31 +243,29 @@ static Handle<Value> nacl_sign_keypair (const Arguments& args) {
 }
 
 static Handle<Value> nacl_secretbox (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, SecretBox);
-    uv_queue_work(uv_default_loop(), &req->request,
-        HandleReqAsync, HandleReqAsyncAfter);
-
+    NaclReq *req = new NaclReq();
+    req->init(args, SecretBox, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_secretbox_open (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, SecretBoxOpen);
-    uv_queue_work(uv_default_loop(), &req->request,
-        HandleReqAsync, HandleReqAsyncAfter);
-
+    NaclReq *req = new NaclReq();
+    req->init(args, SecretBoxOpen, Async);
     return Undefined();
 }
 
 static Handle<Value> nacl_secretbox_sync (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, SecretBox);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, SecretBox, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 static Handle<Value> nacl_secretbox_open_sync (const Arguments& args) {
-    NaclReq *req = NaclReq::New(args, SecretBoxOpen);
-    req->process();
-    return req->returnVal();
+    NaclReq req;
+    req.init(args, SecretBoxOpen, Sync);
+    req.process();
+    return req.returnVal();
 }
 
 
