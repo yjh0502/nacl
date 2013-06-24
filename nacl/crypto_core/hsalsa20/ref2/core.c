@@ -4,7 +4,7 @@ D. J. Bernstein
 Public domain.
 */
 
-#include "crypto_core.h"
+#include "crypto_core_hsalsa20.h"
 
 #define ROUNDS 20
 
@@ -33,7 +33,7 @@ static void store_littleendian(unsigned char *x,uint32 u)
   x[3] = u;
 }
 
-int crypto_core(
+int crypto_core_hsalsa20(
         unsigned char *out,
   const unsigned char *in,
   const unsigned char *k,
@@ -41,25 +41,24 @@ int crypto_core(
 )
 {
   uint32 x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15;
-  uint32 j0, j1, j2, j3, j4, j5, j6, j7, j8, j9, j10, j11, j12, j13, j14, j15;
   int i;
 
-  j0 = x0 = load_littleendian(c + 0);
-  j1 = x1 = load_littleendian(k + 0);
-  j2 = x2 = load_littleendian(k + 4);
-  j3 = x3 = load_littleendian(k + 8);
-  j4 = x4 = load_littleendian(k + 12);
-  j5 = x5 = load_littleendian(c + 4);
-  j6 = x6 = load_littleendian(in + 0);
-  j7 = x7 = load_littleendian(in + 4);
-  j8 = x8 = load_littleendian(in + 8);
-  j9 = x9 = load_littleendian(in + 12);
-  j10 = x10 = load_littleendian(c + 8);
-  j11 = x11 = load_littleendian(k + 16);
-  j12 = x12 = load_littleendian(k + 20);
-  j13 = x13 = load_littleendian(k + 24);
-  j14 = x14 = load_littleendian(k + 28);
-  j15 = x15 = load_littleendian(c + 12);
+  x0 = load_littleendian(c + 0);
+  x1 = load_littleendian(k + 0);
+  x2 = load_littleendian(k + 4);
+  x3 = load_littleendian(k + 8);
+  x4 = load_littleendian(k + 12);
+  x5 = load_littleendian(c + 4);
+  x6 = load_littleendian(in + 0);
+  x7 = load_littleendian(in + 4);
+  x8 = load_littleendian(in + 8);
+  x9 = load_littleendian(in + 12);
+  x10 = load_littleendian(c + 8);
+  x11 = load_littleendian(k + 16);
+  x12 = load_littleendian(k + 20);
+  x13 = load_littleendian(k + 24);
+  x14 = load_littleendian(k + 28);
+  x15 = load_littleendian(c + 12);
 
   for (i = ROUNDS;i > 0;i -= 2) {
      x4 ^= rotate( x0+x12, 7);
@@ -95,32 +94,6 @@ int crypto_core(
     x14 ^= rotate(x13+x12,13);
     x15 ^= rotate(x14+x13,18);
   }
-
-  x0 += j0;
-  x1 += j1;
-  x2 += j2;
-  x3 += j3;
-  x4 += j4;
-  x5 += j5;
-  x6 += j6;
-  x7 += j7;
-  x8 += j8;
-  x9 += j9;
-  x10 += j10;
-  x11 += j11;
-  x12 += j12;
-  x13 += j13;
-  x14 += j14;
-  x15 += j15;
-
-  x0 -= load_littleendian(c + 0);
-  x5 -= load_littleendian(c + 4);
-  x10 -= load_littleendian(c + 8);
-  x15 -= load_littleendian(c + 12);
-  x6 -= load_littleendian(in + 0);
-  x7 -= load_littleendian(in + 4);
-  x8 -= load_littleendian(in + 8);
-  x9 -= load_littleendian(in + 12);
 
   store_littleendian(out + 0,x0);
   store_littleendian(out + 4,x5);

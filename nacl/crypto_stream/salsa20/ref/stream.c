@@ -5,13 +5,12 @@ Public domain.
 */
 
 #include "crypto_core_salsa20.h"
-#include "crypto_stream.h"
 
 typedef unsigned int uint32;
 
 static const unsigned char sigma[16] = "expand 32-byte k";
 
-int crypto_stream(
+int crypto_stream_salsa20_ref(
         unsigned char *c,unsigned long long clen,
   const unsigned char *n,
   const unsigned char *k

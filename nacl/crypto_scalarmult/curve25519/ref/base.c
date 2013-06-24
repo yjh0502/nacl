@@ -5,7 +5,7 @@ Public domain.
 Derived from public domain code by D. J. Bernstein.
 */
 
-#include "crypto_scalarmult_curve25519.h"
+#include "crypto_scalarmult.h"
 
 const unsigned char base[32] = {9};
 

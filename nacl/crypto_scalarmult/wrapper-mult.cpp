@@ -1,6 +1,6 @@
 #include <string>
 using std::string;
-#include "crypto_scalarmult_curve25519.h"
+#include "crypto_scalarmult.h"
 
 string crypto_scalarmult(const string &n,const string &p)
 {
