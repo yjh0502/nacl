@@ -19,23 +19,35 @@ var nonce = new Buffer(nacl.box_NONCEBYTES);
 var kp_send = nacl.box_keypair(),
     kp_recv = nacl.box_keypair();
 
-var encrypt_public = function(cb) {
+var box = function(cb) {
     nacl.box(data, nonce, kp_recv[0], kp_send[1], cb);
 }
 
 var encrypted_public = nacl.box_sync(data, nonce, kp_recv[0], kp_send[1])
-var decrypt_public = function(cb) {
+var box_open = function(cb) {
     nacl.box_open(encrypted_public, nonce, kp_send[0], kp_recv[1], cb);
 }
 
-var key = new Buffer(nacl.secretbox_KEYBYTES);
-var encrypt_secret = function(cb) {
-    nacl.secretbox(data, nonce, key, cb);
+
+var kp_sign = nacl.sign_keypair();
+var sign = function(cb) {
+    nacl.sign(data, kp_sign[1], cb);
 }
 
-var encrypted = nacl.secretbox_sync(data, nonce, key);
-var decrypt_secret = function(cb) {
-    nacl.secretbox_open(encrypted, nonce, key, cb);
+var sign_boxed = nacl.sign_sync(data, kp_sign[1]);
+var sign_open = function(cb) {
+    nacl.sign_open(sign_boxed, kp_sign[0], cb);
+}
+
+
+var key_secret = new Buffer(nacl.secretbox_KEYBYTES);
+var secretbox = function(cb) {
+    nacl.secretbox(data, nonce, key_secret, cb);
+}
+
+var encrypted = nacl.secretbox_sync(data, nonce, key_secret);
+var secretbox_open = function(cb) {
+    nacl.secretbox_open(encrypted, nonce, key_secret, cb);
 }
 
 var run_bench_with = function(func) {
@@ -58,7 +70,9 @@ var run_bench_with = function(func) {
 };
 
 async.series([
-    run_bench_with(encrypt_public),
-    run_bench_with(decrypt_public),
-    run_bench_with(encrypt_secret),
-    run_bench_with(decrypt_secret)]);
+    run_bench_with(box),
+    run_bench_with(box_open),
+    run_bench_with(sign),
+    run_bench_with(sign_open),
+    run_bench_with(secretbox),
+    run_bench_with(secretbox_open)]);
