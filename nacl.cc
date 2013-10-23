@@ -16,7 +16,7 @@
 
 /** In-memory inflate/deflate implementation */
 typedef int (*zlib_op)(mz_streamp strm, int flush);
-#define CHUNK_SIZE (1024 * 4)
+#define CHUNK_SIZE (1024 * 4 * 4)
 
 static int init_stream(z_stream *strm,
         const void *src, int srclen) {
@@ -34,8 +34,9 @@ static int zlib_loop(z_stream *strm, zlib_op op_func, char **buf, int *buflen) {
 
     int err, op = Z_NO_FLUSH;
     while((err = op_func(strm, op)) != Z_STREAM_END) {
-        if(err != Z_OK)
+        if(err != Z_OK) {
             goto err;
+        }
 
         if(!strm->avail_in) {
             op = Z_FINISH;
@@ -58,14 +59,15 @@ err:
     free(out);
     *buf = NULL;
     *buflen = 0;
-    return -1;
+    return err;
 }
 
 int inflate_data(const void *src, int srclen, char **dest_out, int *destlen_out) {
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
-    if(init_stream(&strm, src, srclen))
+    if(init_stream(&strm, src, srclen)) {
         return -1;
+    }
 
     if(inflateInit(&strm) != Z_OK) {
         inflateEnd(&strm);
@@ -85,8 +87,9 @@ int deflate_data(const void *src, int srclen,
         char ** dest_out, int *destlen_out) {
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
-    if(init_stream(&strm, src, srclen))
+    if(init_stream(&strm, src, srclen)) {
         return -1;
+    }
 
     if(deflateInit(&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
         deflateEnd(&strm);
@@ -166,8 +169,8 @@ struct NaclReq {
 };
 
 void NaclReq::process() {
-    char *out;
-    int out_len, err;
+    char *out = NULL;
+    int out_len = 0, err = 0;
     try {
         switch(this->type) {
         case DeflateBox:
@@ -177,22 +180,28 @@ void NaclReq::process() {
                 this->err = "failed to deflate"; return;
             }
             this->m = string(out, out_len);
-            //fallthrough
+            free(out);
+            this->c = crypto_box(this->m, this->n, this->pk, this->sk);
+            break;
+
         case Box:
             this->c = crypto_box(this->m, this->n, this->pk, this->sk);
             break;
+
         case BoxOpen:
             this->c = crypto_box_open(this->m, this->n, this->pk, this->sk);
-            //fallthrough
+            break;
+
         case InflateBoxOpen:
-            // Deflate before box
+            this->c = crypto_box_open(this->m, this->n, this->pk, this->sk);
             err = inflate_data(this->c.c_str(), this->c.length(), &out, &out_len);
             if(err) {
-                this->err = "failed to deflate"; return;
+                this->err = "failed to inflate"; return;
             }
             this->c = string(out, out_len);
-            // Inflate before box_open
+            free(out);
             break;
+
         case Sign:
             this->c = crypto_sign(this->m, this->sk);
             break;
