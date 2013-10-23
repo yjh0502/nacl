@@ -16,7 +16,7 @@
 
 /** In-memory inflate/deflate implementation */
 typedef int (*zlib_op)(mz_streamp strm, int flush);
-#define CHUNK_SIZE (1024 * 4 * 4)
+#define CHUNK_SIZE (1024 * 16)
 
 static int init_stream(z_stream *strm,
         const void *src, int srclen) {
@@ -38,17 +38,20 @@ static int zlib_loop(z_stream *strm, zlib_op op_func, char **buf, int *buflen) {
             goto err;
         }
 
-        if(!strm->avail_in) {
-            op = Z_FINISH;
+        if(strm->avail_out == 0) {
+            if(!(out = (char *)realloc(out, outlen << 1)))
+                goto err;
+
+            strm->next_out = (Bytef*)(out + outlen);
+            strm->avail_out = outlen;
+            outlen <<= 1;
             continue;
         }
 
-        if(!(out = (char *)realloc(out, outlen << 1)))
-            goto err;
-
-        strm->next_out = (Bytef*)(out + outlen);
-        strm->avail_out = outlen;
-        outlen <<= 1;
+        if(strm->avail_in == 0) {
+            op = Z_FINISH;
+            continue;
+        }
     }
 
     *buf = out;
