@@ -66,10 +66,12 @@ int inflate_data(const void *src, int srclen, char **dest_out, int *destlen_out)
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
     if(init_stream(&strm, src, srclen)) {
+        printf("inflate: failed to init stream\n");
         return -1;
     }
 
     if(inflateInit(&strm) != Z_OK) {
+        printf("inflate: failed to inflateInit\n");
         inflateEnd(&strm);
         return -1;
     }
@@ -77,6 +79,7 @@ int inflate_data(const void *src, int srclen, char **dest_out, int *destlen_out)
     int err = zlib_loop(&strm, inflate, dest_out, destlen_out);
     inflateEnd(&strm);
     if(err) {
+        printf("inflate: failed to loop: %d\n", err);
         return err;
     }
 
@@ -88,10 +91,12 @@ int deflate_data(const void *src, int srclen,
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
     if(init_stream(&strm, src, srclen)) {
+        printf("failed to init stream\n");
         return -1;
     }
 
     if(deflateInit(&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
+        printf("failed to deflateInit\n");
         deflateEnd(&strm);
         return -1;
     }
@@ -99,6 +104,7 @@ int deflate_data(const void *src, int srclen,
     int err = zlib_loop(&strm, deflate, dest_out, destlen_out);
     deflateEnd(&strm);
     if(err) {
+        printf("deflate error: %d\n", err);
         return err;
     }
 
