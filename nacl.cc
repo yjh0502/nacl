@@ -10,6 +10,99 @@
 #include <crypto_sign.h>
 #include <crypto_secretbox.h>
 
+
+// Zlib support
+#include "miniz.c"
+
+/** In-memory inflate/deflate implementation */
+typedef int (*zlib_op)(mz_streamp strm, int flush);
+#define CHUNK_SIZE (1024 * 4)
+
+static int init_stream(z_stream *strm,
+        const void *src, int srclen) {
+    strm->total_in = strm->avail_in = srclen;
+    strm->avail_out = CHUNK_SIZE;
+    strm->next_in = (Bytef*) src;
+    strm->next_out = (Bytef*) malloc(CHUNK_SIZE);
+
+    return !strm->next_out;
+}
+
+static int zlib_loop(z_stream *strm, zlib_op op_func, char **buf, int *buflen) {
+    char *out = (char *)strm->next_out;
+    int outlen = strm->avail_out;
+
+    int err, op = Z_NO_FLUSH;
+    while((err = op_func(strm, op)) != Z_STREAM_END) {
+        if(err != Z_OK)
+            goto err;
+
+        if(!strm->avail_in) {
+            op = Z_FINISH;
+            continue;
+        }
+
+        if(!(out = (char *)realloc(out, outlen << 1)))
+            goto err;
+
+        strm->next_out = (Bytef*)(out + outlen);
+        strm->avail_out = outlen;
+        outlen <<= 1;
+    }
+
+    *buf = out;
+    *buflen = strm->total_out;
+    return 0;
+
+err:
+    free(out);
+    *buf = NULL;
+    *buflen = 0;
+    return -1;
+}
+
+int inflate_data(const void *src, int srclen, char **dest_out, int *destlen_out) {
+    z_stream strm;
+    memset(&strm, 0, sizeof(z_stream));
+    if(init_stream(&strm, src, srclen))
+        return -1;
+
+    if(inflateInit(&strm) != Z_OK) {
+        inflateEnd(&strm);
+        return -1;
+    }
+
+    int err = zlib_loop(&strm, inflate, dest_out, destlen_out);
+    inflateEnd(&strm);
+    if(err) {
+        return err;
+    }
+
+    return 0;
+}
+
+int deflate_data(const void *src, int srclen,
+        char ** dest_out, int *destlen_out) {
+    z_stream strm;
+    memset(&strm, 0, sizeof(z_stream));
+    if(init_stream(&strm, src, srclen))
+        return -1;
+
+    if(deflateInit(&strm, Z_DEFAULT_COMPRESSION) != Z_OK) {
+        deflateEnd(&strm);
+        return -1;
+    }
+
+    int err = zlib_loop(&strm, deflate, dest_out, destlen_out);
+    deflateEnd(&strm);
+    if(err) {
+        return err;
+    }
+
+    return 0;
+}
+
+
 using namespace std;
 using namespace node;
 using namespace v8;
@@ -43,6 +136,8 @@ static Buffer* str_to_buf (string s) {
 enum NaclReqType {
     Box,
     BoxOpen,
+    DeflateBox,
+    InflateBoxOpen,
     Sign,
     SignOpen,
 
@@ -71,13 +166,32 @@ struct NaclReq {
 };
 
 void NaclReq::process() {
+    char *out;
+    int out_len, err;
     try {
         switch(this->type) {
+        case DeflateBox:
+            // Deflate before box
+            err = deflate_data(this->m.c_str(), this->m.length(), &out, &out_len);
+            if(err) {
+                this->err = "failed to deflate"; return;
+            }
+            this->m = string(out, out_len);
+            //fallthrough
         case Box:
             this->c = crypto_box(this->m, this->n, this->pk, this->sk);
             break;
         case BoxOpen:
             this->c = crypto_box_open(this->m, this->n, this->pk, this->sk);
+            //fallthrough
+        case InflateBoxOpen:
+            // Deflate before box
+            err = inflate_data(this->c.c_str(), this->c.length(), &out, &out_len);
+            if(err) {
+                this->err = "failed to deflate"; return;
+            }
+            this->c = string(out, out_len);
+            // Inflate before box_open
             break;
         case Sign:
             this->c = crypto_sign(this->m, this->sk);
@@ -135,6 +249,8 @@ void NaclReq::init(const Arguments &args, NaclReqType type, CallType callType) {
 
     int callbackIndex = 0;
     switch(type) {
+    case DeflateBox:
+    case InflateBoxOpen:
     case Box:
     case BoxOpen:
         this->m = buf_to_str(args[0]->ToObject());
@@ -181,6 +297,19 @@ static Handle<Value> nacl_box_sync (const Arguments& args) {
     return req.returnVal();
 }
 
+static Handle<Value> nacl_deflate_box (const Arguments& args) {
+    NaclReq *req = new NaclReq();
+    req->init(args, DeflateBox, Async);
+    return Undefined();
+}
+
+static Handle<Value> nacl_deflate_box_sync (const Arguments& args) {
+    NaclReq req;
+    req.init(args, DeflateBox, Sync);
+    req.process();
+    return req.returnVal();
+}
+
 static Handle<Value> nacl_box_open (const Arguments& args) {
     NaclReq *req = new NaclReq();
     req->init(args, BoxOpen, Async);
@@ -193,6 +322,20 @@ static Handle<Value> nacl_box_open_sync (const Arguments& args) {
     req.process();
     return req.returnVal();
 }
+
+static Handle<Value> nacl_inflate_box_open (const Arguments& args) {
+    NaclReq *req = new NaclReq();
+    req->init(args, InflateBoxOpen, Async);
+    return Undefined();
+}
+
+static Handle<Value> nacl_inflate_box_open_sync (const Arguments& args) {
+    NaclReq req;
+    req.init(args, InflateBoxOpen, Sync);
+    req.process();
+    return req.returnVal();
+}
+
 
 static Handle<Value> nacl_box_keypair (const Arguments& args) {
     HandleScope scope;
@@ -276,6 +419,12 @@ void init (Handle<Object> target) {
     NODE_SET_METHOD(target, "box_open", nacl_box_open);
     NODE_SET_METHOD(target, "box_sync", nacl_box_sync);
     NODE_SET_METHOD(target, "box_open_sync", nacl_box_open_sync);
+
+    NODE_SET_METHOD(target, "deflate_box", nacl_deflate_box);
+    NODE_SET_METHOD(target, "inflate_box_open", nacl_inflate_box_open);
+    NODE_SET_METHOD(target, "deflate_box_sync", nacl_deflate_box_sync);
+    NODE_SET_METHOD(target, "inflate_box_open_sync", nacl_inflate_box_open_sync);
+
     NODE_SET_METHOD(target, "box_keypair", nacl_box_keypair);
 
     NODE_SET_METHOD(target, "sign", nacl_sign);
